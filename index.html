@@ -1,0 +1,2235 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>FastKanban - Agile Kanban Board</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!-- SortableJS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+
+    <!-- Google Fonts -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: { sans: ["Inter", "sans-serif"] },
+            colors: {
+              jira: {
+                bg: "#F4F5F7",
+                sidebar: "#0747A6",
+                primary: "#0052CC",
+                hover: "#EBECF0",
+                text: "#172B4D",
+                subtext: "#5E6C84",
+                danger: "#DE350B",
+                success: "#00875A",
+              },
+            },
+          },
+        },
+      };
+    </script>
+
+    <style>
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(9, 30, 66, 0.2);
+        border-radius: 3px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(9, 30, 66, 0.4);
+      }
+
+      .ghost-card {
+        opacity: 0.5;
+        background: #f4f5f7;
+        border: 2px dashed #0052cc;
+      }
+      .ticket-card:hover {
+        background-color: #ebecf0;
+      }
+      .bar-fill {
+        transition: width 1s ease-out;
+      }
+
+      /* Animations */
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: scale(0.98);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+      .modal-content {
+        animation: fadeIn 0.2s ease-out forwards;
+      }
+
+      .input-error {
+        border-color: #de350b !important;
+        box-shadow: 0 0 0 1px #de350b;
+      }
+
+      /* Mobile Sidebar Transition */
+      .sidebar-closed {
+        transform: translateX(-100%);
+      }
+      .sidebar-open {
+        transform: translateX(0);
+      }
+
+      /* Drag Handle */
+      .handle {
+        cursor: grab;
+        touch-action: none;
+      }
+      .handle:active {
+        cursor: grabbing;
+      }
+      .col-handle {
+        cursor: grab;
+      }
+      .col-handle:active {
+        cursor: grabbing;
+      }
+
+      /* Fallback Drag Style (forceFallback: true) */
+      .sortable-fallback {
+        opacity: 1 !important;
+        background: white;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15),
+          0 8px 10px -6px rgba(0, 0, 0, 0.1);
+        transform: rotate(2deg);
+        border: 1px solid #0052cc;
+        cursor: grabbing;
+      }
+
+      /* Loading Spinner */
+      .loader {
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #3498db;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body
+    class="bg-white text-jira-text h-screen flex overflow-hidden font-sans selection:bg-blue-100"
+  >
+    <div
+      id="loading-overlay"
+      class="fixed inset-0 bg-black/50 z-[60] hidden flex items-center justify-center backdrop-blur-sm"
+    >
+      <div class="bg-white p-6 rounded-lg shadow-xl flex flex-col items-center">
+        <div class="loader mb-4"></div>
+        <p class="text-gray-700 font-medium">Syncing...</p>
+      </div>
+    </div>
+
+    <!-- MOBILE SIDEBAR OVERLAY -->
+    <div
+      id="sidebar-overlay"
+      onclick="app.toggleSidebar()"
+      class="fixed inset-0 bg-black/50 z-30 hidden md:hidden backdrop-blur-sm transition-opacity duration-300 opacity-0"
+    ></div>
+
+    <!-- SIDEBAR -->
+    <aside
+      class="w-64 bg-jira-sidebar flex flex-col text-white flex-shrink-0 transition-transform duration-300 ease-in-out z-40 fixed inset-y-0 left-0 md:relative md:translate-x-0 sidebar-closed shadow-2xl md:shadow-none"
+      id="sidebar"
+    >
+      <div
+        class="h-14 flex items-center justify-between px-4 font-bold text-xl tracking-tight border-b border-blue-800 shrink-0"
+      >
+        <div class="flex items-center">
+          <i class="ph-fill ph-kanban mr-2"></i> FastKanban
+        </div>
+        <!-- Close button for mobile -->
+        <button
+          onclick="app.toggleSidebar()"
+          class="md:hidden text-blue-200 hover:text-white"
+        >
+          <i class="ph ph-x text-xl"></i>
+        </button>
+      </div>
+
+      <div class="flex-1 py-6 px-2 space-y-1 overflow-y-auto">
+        <div class="px-2 text-xs font-bold uppercase text-blue-300 mb-2">
+          Planning
+        </div>
+        <a
+          href="#"
+          onclick="app.navigate('board')"
+          id="nav-board"
+          class="nav-item flex items-center px-3 py-2 rounded text-blue-100 hover:bg-blue-700 group transition-colors"
+        >
+          <i class="ph ph-columns mr-3 text-lg"></i>
+          <span class="font-medium">Active Sprint</span>
+        </a>
+        <a
+          href="#"
+          onclick="app.navigate('backlog')"
+          id="nav-backlog"
+          class="nav-item flex items-center px-3 py-2 rounded text-blue-100 hover:bg-blue-700 group transition-colors"
+        >
+          <i class="ph ph-list-dashes mr-3 text-lg"></i>
+          <span class="font-medium">Backlog</span>
+        </a>
+
+        <div class="px-2 text-xs font-bold uppercase text-blue-300 mt-6 mb-2">
+          Analysis
+        </div>
+        <a
+          href="#"
+          onclick="app.navigate('reports')"
+          id="nav-reports"
+          class="nav-item flex items-center px-3 py-2 rounded text-blue-100 hover:bg-blue-700 group transition-colors"
+        >
+          <i class="ph ph-chart-bar mr-3 text-lg"></i>
+          <span>Reports & Stats</span>
+        </a>
+        <a
+          href="#"
+          onclick="app.navigate('archive')"
+          id="nav-archive"
+          class="nav-item flex items-center px-3 py-2 rounded text-blue-100 hover:bg-blue-700 group transition-colors"
+        >
+          <i class="ph ph-archive mr-3 text-lg"></i>
+          <span>Archive</span>
+        </a>
+      </div>
+
+      <div class="p-4 border-t border-blue-800 shrink-0">
+        <button
+          onclick="app.toggleModal('settings')"
+          class="flex items-center text-blue-200 hover:text-white transition-colors w-full"
+        >
+          <i class="ph ph-gear text-xl mr-3"></i>
+          <span class="text-sm font-medium">Project Settings</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="flex-1 flex flex-col min-w-0 bg-white relative">
+      <!-- HEADER -->
+      <header
+        id="main-header"
+        class="border-b border-gray-200 bg-white shrink-0 z-20 relative shadow-sm md:shadow-none transition-all"
+      >
+        <!-- Content injected by JS Renderer -->
+      </header>
+
+      <!-- VIEW CONTAINER -->
+      <div
+        id="view-container"
+        class="flex-1 overflow-hidden bg-jira-bg relative"
+      >
+        <!-- Content injected by JS -->
+      </div>
+    </main>
+
+    <!-- Create Ticket MODAL -->
+    <div
+      id="create-modal-overlay"
+      class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center backdrop-blur-sm px-4"
+    >
+      <div
+        class="bg-white w-full max-w-lg rounded-lg shadow-2xl flex flex-col max-h-[90vh] modal-content"
+      >
+        <div
+          class="px-4 sm:px-6 py-4 border-b border-gray-100 flex justify-between items-center"
+        >
+          <h3 class="text-lg font-semibold text-gray-700">Create Ticket</h3>
+          <button
+            onclick="app.toggleModal('create')"
+            class="text-gray-400 hover:text-gray-600 p-1"
+          >
+            <i class="ph ph-x text-xl"></i>
+          </button>
+        </div>
+
+        <div class="p-4 sm:p-6 overflow-y-auto space-y-4">
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase mb-1"
+              >Summary <span class="text-red-500">*</span></label
+            >
+            <input
+              type="text"
+              id="input-title"
+              class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none transition-colors"
+              placeholder="What needs to be done?"
+            />
+            <p
+              id="input-title-error"
+              class="text-jira-danger text-xs mt-1 hidden"
+            >
+              Summary is required.
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label
+                class="block text-xs font-bold text-gray-500 uppercase mb-1"
+                >Priority</label
+              >
+              <select
+                id="input-priority"
+                class="w-full border border-gray-300 rounded p-2 bg-white"
+              >
+                <option value="High">High</option>
+                <option value="Medium" selected>Medium</option>
+                <option value="Low">Low</option>
+              </select>
+            </div>
+            <div>
+              <label
+                class="block text-xs font-bold text-gray-500 uppercase mb-1"
+                >Due Date</label
+              >
+              <input
+                type="date"
+                id="input-due"
+                class="w-full border border-gray-300 rounded p-2 bg-white text-sm"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase mb-1"
+              >Assignee</label
+            >
+            <div class="flex items-center gap-2">
+              <div id="create-avatar-preview" class="shrink-0"></div>
+              <input
+                type="text"
+                id="input-assignee"
+                oninput="app.updateAvatarPreview('create', this.value)"
+                class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none transition-colors"
+                placeholder="e.g. John Doe"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase mb-1"
+              >Description</label
+            >
+            <textarea
+              id="input-desc"
+              rows="3"
+              class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none"
+              placeholder="Add a description..."
+            ></textarea>
+          </div>
+        </div>
+
+        <div
+          class="px-4 sm:px-6 py-4 border-t border-gray-100 bg-gray-50 rounded-b flex justify-end space-x-2"
+        >
+          <button
+            onclick="app.toggleModal('create')"
+            class="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded text-sm font-medium"
+          >
+            Cancel
+          </button>
+          <button
+            onclick="app.createTicket()"
+            class="px-4 py-2 bg-jira-primary text-white hover:bg-blue-700 rounded text-sm font-medium shadow-sm"
+          >
+            Create
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- COMPLETE SPRINT MODAL -->
+    <div
+      id="complete-sprint-modal-overlay"
+      class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center backdrop-blur-sm px-4"
+    >
+      <div
+        class="bg-white w-full max-w-md rounded-lg shadow-2xl flex flex-col modal-content"
+      >
+        <div
+          class="px-6 py-4 border-b border-gray-100 flex justify-between items-center"
+        >
+          <h3 class="text-lg font-semibold text-gray-700">Complete Sprint</h3>
+          <button
+            onclick="app.toggleModal('complete-sprint')"
+            class="text-gray-400 hover:text-gray-600"
+          >
+            <i class="ph ph-x text-xl"></i>
+          </button>
+        </div>
+
+        <div class="p-6 space-y-4">
+          <div class="flex items-center justify-center mb-2">
+            <div
+              class="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-2xl"
+            >
+              <i class="ph-fill ph-trophy"></i>
+            </div>
+          </div>
+          <h4
+            class="text-center text-xl font-bold text-gray-800"
+            id="complete-sprint-name"
+          >
+            Sprint 1
+          </h4>
+
+          <div
+            class="bg-gray-50 p-4 rounded text-sm space-y-2 border border-gray-100"
+          >
+            <div class="flex justify-between">
+              <span class="text-gray-600">Completed Issues</span>
+              <span
+                class="font-bold text-green-600"
+                id="complete-sprint-done-count"
+                >0</span
+              >
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Open Issues</span>
+              <span
+                class="font-bold text-gray-800"
+                id="complete-sprint-open-count"
+                >0</span
+              >
+            </div>
+          </div>
+
+          <p class="text-xs text-gray-500 text-center leading-relaxed">
+            Open issues will be moved to the new
+            <strong
+              ><span id="complete-sprint-next-name" class="text-blue-600"
+                >Sprint 2</span
+              ></strong
+            >.
+          </p>
+        </div>
+
+        <div
+          class="px-6 py-4 border-t border-gray-100 bg-gray-50 rounded-b flex justify-end space-x-2"
+        >
+          <button
+            onclick="app.toggleModal('complete-sprint')"
+            class="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded text-sm font-medium"
+          >
+            Cancel
+          </button>
+          <button
+            onclick="app.confirmCompleteSprint()"
+            class="px-4 py-2 bg-jira-primary text-white hover:bg-blue-700 rounded text-sm font-medium shadow-sm"
+          >
+            Complete Sprint
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- CREATE COLUMN MODAL -->
+    <div
+      id="create-column-modal-overlay"
+      class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center backdrop-blur-sm px-4"
+    >
+      <div
+        class="bg-white w-full max-w-sm rounded-lg shadow-2xl flex flex-col modal-content"
+      >
+        <div
+          class="px-6 py-4 border-b border-gray-100 flex justify-between items-center"
+        >
+          <h3 class="text-lg font-semibold text-gray-700">Add Column</h3>
+          <button
+            onclick="app.toggleModal('create-column')"
+            class="text-gray-400 hover:text-gray-600"
+          >
+            <i class="ph ph-x text-xl"></i>
+          </button>
+        </div>
+        <div class="p-6">
+          <label class="block text-xs font-bold text-gray-500 uppercase mb-2"
+            >Column Name <span class="text-red-500">*</span></label
+          >
+          <input
+            type="text"
+            id="input-column-name"
+            class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none transition-colors"
+            placeholder="e.g. QA, Deployment"
+          />
+        </div>
+        <div
+          class="px-6 py-4 border-t border-gray-100 bg-gray-50 rounded-b flex justify-end space-x-2"
+        >
+          <button
+            onclick="app.toggleModal('create-column')"
+            class="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded text-sm font-medium"
+          >
+            Cancel
+          </button>
+          <button
+            onclick="app.confirmCreateColumn()"
+            class="px-4 py-2 bg-jira-primary text-white hover:bg-blue-700 rounded text-sm font-medium shadow-sm"
+          >
+            Add
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- DELETE COLUMN MODAL -->
+    <div
+      id="delete-column-modal-overlay"
+      class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center backdrop-blur-sm px-4"
+    >
+      <div
+        class="bg-white w-full max-w-md rounded-lg shadow-2xl flex flex-col modal-content"
+      >
+        <div
+          class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-red-50 rounded-t-lg"
+        >
+          <h3 class="text-lg font-semibold text-red-700 flex items-center">
+            <i class="ph-fill ph-warning-circle mr-2"></i> Delete Column
+          </h3>
+          <button
+            onclick="app.toggleModal('delete-column')"
+            class="text-gray-400 hover:text-gray-600"
+          >
+            <i class="ph ph-x text-xl"></i>
+          </button>
+        </div>
+        <div class="p-6">
+          <p class="text-gray-700 text-sm mb-4">
+            Are you sure you want to delete the column
+            <strong id="delete-column-name" class="text-gray-900"></strong>?
+          </p>
+          <div
+            class="bg-gray-50 border border-gray-200 rounded p-3 flex items-start"
+          >
+            <i class="ph-fill ph-info text-blue-500 mt-0.5 mr-2"></i>
+            <p class="text-xs text-gray-600">
+              <span id="delete-column-count" class="font-bold text-gray-800"
+                >0</span
+              >
+              tickets currently in this column will be moved to the
+              <strong>Backlog</strong>.
+            </p>
+          </div>
+        </div>
+        <div
+          class="px-6 py-4 border-t border-gray-100 bg-gray-50 rounded-b flex justify-end space-x-2"
+        >
+          <button
+            onclick="app.toggleModal('delete-column')"
+            class="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded text-sm font-medium"
+          >
+            Cancel
+          </button>
+          <button
+            onclick="app.confirmDeleteColumn()"
+            class="px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded text-sm font-medium shadow-sm"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SETTINGS MODAL -->
+    <div
+      id="settings-modal-overlay"
+      class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center backdrop-blur-sm px-4"
+    >
+      <div
+        class="bg-white w-full max-w-sm rounded-lg shadow-2xl flex flex-col modal-content"
+      >
+        <div
+          class="px-6 py-4 border-b border-gray-100 flex justify-between items-center"
+        >
+          <h3 class="text-lg font-semibold text-gray-700">Project Settings</h3>
+          <button
+            onclick="app.toggleModal('settings')"
+            class="text-gray-400 hover:text-gray-600"
+          >
+            <i class="ph ph-x text-xl"></i>
+          </button>
+        </div>
+        <div class="p-6">
+          <label class="block text-xs font-bold text-gray-500 uppercase mb-2"
+            >Project Key <span class="text-red-500">*</span></label
+          >
+          <div class="text-xs text-gray-400 mb-2">
+            Change the prefix for ticket IDs (e.g., "KAN" -> "KAN-101").
+          </div>
+          <input
+            type="text"
+            id="input-project-key"
+            class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none transition-colors uppercase"
+            placeholder="KAN"
+          />
+        </div>
+        <div
+          class="px-6 py-4 border-t border-gray-100 bg-gray-50 rounded-b flex justify-end space-x-2"
+        >
+          <button
+            onclick="app.toggleModal('settings')"
+            class="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded text-sm font-medium"
+          >
+            Cancel
+          </button>
+          <button
+            onclick="app.saveSettings()"
+            class="px-4 py-2 bg-jira-primary text-white hover:bg-blue-700 rounded text-sm font-medium shadow-sm"
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW/EDIT ISSUE MODAL -->
+    <div
+      id="edit-modal-overlay"
+      class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center backdrop-blur-sm px-4"
+    >
+      <div
+        class="bg-white w-full max-w-2xl rounded-lg shadow-2xl flex flex-col max-h-[95vh] modal-content"
+      >
+        <!-- Header -->
+        <div
+          class="px-4 sm:px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-lg shrink-0"
+        >
+          <div class="flex items-center space-x-3">
+            <span
+              id="edit-ticket-id"
+              class="text-sm font-mono text-gray-500 bg-gray-200 px-2 py-1 rounded"
+              >KAN-123</span
+            >
+          </div>
+          <div class="flex items-center space-x-3 sm:space-x-4">
+            <button
+              onclick="app.deleteCurrentTicket()"
+              class="text-gray-400 hover:text-jira-danger transition-colors p-1.5 rounded hover:bg-red-50"
+              title="Delete Issue"
+            >
+              <i class="ph ph-trash text-xl"></i>
+            </button>
+            <button
+              onclick="app.toggleModal('edit')"
+              class="text-gray-400 hover:text-gray-600 p-1.5"
+            >
+              <i class="ph ph-x text-xl"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Content -->
+        <div class="flex flex-col md:flex-row flex-1 overflow-hidden">
+          <!-- Left Panel (Main) -->
+          <div
+            class="flex-1 p-4 sm:p-6 md:p-8 overflow-y-auto border-b md:border-b-0 md:border-r border-gray-100 order-2 md:order-1"
+          >
+            <input
+              type="text"
+              id="edit-title"
+              class="w-full text-xl md:text-2xl font-semibold text-gray-800 border-transparent hover:border-gray-300 border rounded px-2 -ml-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none transition-all mb-4 sm:mb-6 bg-transparent"
+              value="Ticket Title"
+            />
+
+            <label class="block text-xs font-bold text-gray-500 uppercase mb-2"
+              >Description</label
+            >
+            <textarea
+              id="edit-desc"
+              rows="8"
+              class="w-full border border-gray-200 rounded p-3 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none resize-none hover:bg-gray-50 focus:bg-white transition-colors text-sm sm:text-base"
+              placeholder="Add a description..."
+            ></textarea>
+          </div>
+
+          <!-- Right Panel (Meta) -->
+          <div
+            class="w-full md:w-72 bg-gray-50 p-4 sm:p-6 overflow-y-auto space-y-5 order-1 md:order-2 shrink-0"
+          >
+            <div>
+              <label
+                class="block text-xs font-bold text-gray-500 uppercase mb-1"
+                >Status</label
+              >
+              <select
+                id="edit-status"
+                class="w-full border border-gray-300 rounded p-1.5 text-sm bg-white font-medium text-gray-700 shadow-sm focus:ring-blue-500"
+              ></select>
+            </div>
+
+            <div class="grid grid-cols-2 md:grid-cols-1 gap-4">
+              <div>
+                <label
+                  class="block text-xs font-bold text-gray-500 uppercase mb-1"
+                  >Assignee</label
+                >
+                <div class="flex items-center gap-2">
+                  <div id="edit-avatar-preview" class="shrink-0"></div>
+                  <input
+                    type="text"
+                    id="edit-assignee"
+                    oninput="app.updateAvatarPreview('edit', this.value)"
+                    class="w-full border border-gray-300 rounded p-1.5 text-sm bg-white font-medium text-gray-700 shadow-sm focus:ring-blue-500"
+                    placeholder="Unassigned"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label
+                  class="block text-xs font-bold text-gray-500 uppercase mb-1"
+                  >Due Date</label
+                >
+                <input
+                  type="date"
+                  id="edit-due"
+                  class="w-full border border-gray-300 rounded p-1.5 text-sm bg-white text-gray-700 shadow-sm focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label
+                  class="block text-xs font-bold text-gray-500 uppercase mb-1"
+                  >Priority</label
+                >
+                <select
+                  id="edit-priority"
+                  class="w-full border border-gray-300 rounded p-1.5 text-sm bg-white font-medium text-gray-700 shadow-sm focus:ring-blue-500"
+                >
+                  <option value="High">High</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Low">Low</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="pt-4 border-t border-gray-200 hidden md:block">
+              <p class="text-xs text-gray-400 mb-1">
+                Created
+                <span id="edit-created" class="text-gray-600">Oct 24</span>
+              </p>
+              <p class="text-xs text-gray-400">
+                Updated
+                <span id="edit-updated" class="text-gray-600">Just now</span>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div
+          class="px-4 sm:px-6 py-4 border-t border-gray-100 bg-white rounded-b-lg flex justify-end space-x-2 shrink-0"
+        >
+          <button
+            onclick="app.toggleModal('edit')"
+            class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm font-medium"
+          >
+            Cancel
+          </button>
+          <button
+            onclick="app.saveTicketChanges()"
+            class="px-4 py-2 bg-jira-primary text-white hover:bg-blue-700 rounded text-sm font-medium shadow-sm"
+          >
+            Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONFIRMATION MODAL -->
+    <div
+      id="confirmation-modal-overlay"
+      class="fixed inset-0 bg-black/50 hidden z-[70] flex items-center justify-center backdrop-blur-sm px-4"
+    >
+      <div
+        class="bg-white w-full max-w-sm rounded-lg shadow-2xl flex flex-col modal-content overflow-hidden"
+      >
+        <div class="p-6 text-center">
+          <div
+            class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4"
+            id="confirm-icon-bg"
+          >
+            <i
+              class="ph-fill ph-warning text-xl text-red-600"
+              id="confirm-icon"
+            ></i>
+          </div>
+          <h3
+            class="text-lg leading-6 font-medium text-gray-900"
+            id="confirm-modal-title"
+          >
+            Confirm Action
+          </h3>
+          <div class="mt-2">
+            <p class="text-sm text-gray-500" id="confirm-modal-msg">
+              Are you sure you want to proceed?
+            </p>
+          </div>
+        </div>
+        <div
+          class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse gap-2"
+        >
+          <button
+            type="button"
+            id="confirm-btn-action"
+            class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm"
+          >
+            Confirm
+          </button>
+          <button
+            type="button"
+            onclick="app.toggleModal('confirmation')"
+            class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+      /**
+       * 1. CONFIGURATION & SCHEMA
+       */
+      const Config = {
+        priorities: {
+          High: { color: "text-red-600", icon: "ph-arrow-up" },
+          Medium: { color: "text-orange-500", icon: "ph-equals" },
+          Low: { color: "text-green-600", icon: "ph-arrow-down" },
+        },
+        // Initial Columns
+        defaultColumns: [
+          { id: "todo", title: "To Do" },
+          { id: "progress", title: "In Progress" },
+          { id: "done", title: "Done" },
+        ],
+        webAppUrl: "<?= getWebAppUrl() ?>",
+      };
+
+      /**
+       * 2. MOCK DATA GENERATOR
+       */
+      function generateMockData(projectKey = "KAN") {
+        const now = new Date();
+        const tickets = [
+          {
+            id: `${projectKey}-101`,
+            title: "Plan Marketing Campaign",
+            priority: "High",
+            status: "progress",
+            description: "Outline the Q4 strategy.",
+            assignee: "Jane Doe",
+            sprintId: "s1",
+            created: new Date(now - 86400000),
+            due: new Date(now.getTime() + 172800000),
+          },
+          {
+            id: `${projectKey}-102`,
+            title: "Fix Homepage typo",
+            priority: "High",
+            status: "todo",
+            description: "Spelling error in header.",
+            assignee: "Jane Doe",
+            sprintId: "s1",
+            created: new Date(now - 100000),
+            due: null,
+          },
+          {
+            id: `${projectKey}-103`,
+            title: "Client Meeting Prep",
+            priority: "Medium",
+            status: "todo",
+            description: "Gather analytics reports.",
+            assignee: "Alex Brown",
+            sprintId: "s1",
+            created: new Date(now - 2000000),
+            due: new Date(now.getTime() + 600000000),
+          },
+          {
+            id: `${projectKey}-104`,
+            title: "Archive old files",
+            priority: "Low",
+            status: "done",
+            description: "Clean up the shared drive.",
+            assignee: "Charlie Davis",
+            sprintId: "s1",
+            created: new Date(now - 50000000),
+            due: null,
+          },
+          {
+            id: `${projectKey}-106`,
+            title: "Research Competitors",
+            priority: "Low",
+            status: "backlog",
+            description: "Look into new market entrants.",
+            assignee: "Alex Brown",
+            sprintId: null,
+            created: new Date(now - 900000),
+            due: null,
+          },
+        ];
+
+        const sprints = [
+          {
+            id: "s1",
+            name: "Sprint 1",
+            status: "active",
+            startDate: new Date(now - 200000000),
+            endDate: new Date(now.getTime() + 400000000),
+          },
+        ];
+
+        return { tickets, sprints };
+      }
+
+      /**
+       * 3. STORE (STATE MANAGEMENT)
+       */
+      class Store {
+        constructor() {
+          this.projectKey = "KAN";
+          // Initialize with empty arrays, real data loads via init()
+          this.tickets = [];
+          this.sprints = [];
+          this.columns = [];
+          this.subscribers = [];
+
+          // Trigger initial data load
+          this.init();
+        }
+
+        /**
+         * Helper to make API calls to the Google Apps Script Web App
+         */
+        async _apiCall(action, payloadData = {}) {
+          // 1. Show Loading Screen
+          const loader = document.getElementById("loading-overlay");
+          if (loader) loader.classList.remove("hidden");
+
+          try {
+            // Ensure Config.webAppUrl is defined in your index.html or config file
+            const response = await fetch(Config.webAppUrl, {
+              method: "POST",
+              body: JSON.stringify({ action: action, data: payloadData }),
+            });
+
+            const json = await response.json();
+
+            if (json.status === "error") {
+              console.error("Backend Error:", json.message);
+              throw new Error(json.message);
+            }
+
+            return json.data;
+          } catch (error) {
+            console.error("API Request Failed:", error);
+            throw error;
+          } finally {
+            // 2. Hide Loading Screen
+            if (loader) loader.classList.add("hidden");
+          }
+        }
+
+        async init() {
+          try {
+            const data = await this._apiCall("loadInitialData");
+            this.tickets = data.tickets;
+            this.sprints = data.sprints;
+            this.columns = data.columns;
+            if (data.settings && data.settings.projectKey) {
+              this.projectKey = data.settings.projectKey;
+            }
+            this.notify();
+          } catch (e) {
+            console.error("Failed to load initial data:", e);
+          }
+        }
+
+        subscribe(callback) {
+          this.subscribers.push(callback);
+        }
+
+        notify() {
+          this.subscribers.forEach((cb) => cb());
+        }
+
+        // --- READ METHODS (Synchronous access to local cache) ---
+
+        getTicket(id) {
+          return this.tickets.find((t) => t.id === id);
+        }
+        getActiveSprint() {
+          return this.sprints.find((s) => s.status === "active");
+        }
+        getSprint(id) {
+          return this.sprints.find((s) => s.id === id);
+        }
+        getCompletedSprints() {
+          return this.sprints.filter((s) => s.status === "completed");
+        }
+        getColumn(id) {
+          return this.columns.find((c) => c.id === id);
+        }
+
+        // --- WRITE METHODS (Async API calls) ---
+
+        async updateTicketStatus(ticketId, newStatus, newSprintId = undefined) {
+          const ticket = this.tickets.find((t) => t.id === ticketId);
+          if (!ticket) return;
+
+          // Logic to determine Sprint ID (mirrors original logic)
+          let finalSprintId = newSprintId;
+
+          if (finalSprintId === undefined) {
+            finalSprintId = ticket.sprintId; // Default to current
+            const activeSprint = this.getActiveSprint();
+
+            if (newStatus === "backlog") {
+              finalSprintId = ""; // Send empty string for no sprint (backend requirement)
+            } else if (
+              (!ticket.sprintId || ticket.sprintId === "") &&
+              newStatus !== "backlog"
+            ) {
+              // Explicitly only move to sprint if target is board column
+              if (activeSprint) finalSprintId = activeSprint.id;
+            }
+          }
+
+          const payload = {
+            id: ticketId,
+            status: newStatus,
+            sprintId: finalSprintId || "",
+          };
+
+          const updatedTicket = await this._apiCall("updateTicket", payload);
+
+          // Update local cache with result from backend
+          const index = this.tickets.findIndex((t) => t.id === ticketId);
+          if (index !== -1) {
+            this.tickets[index] = updatedTicket;
+            this.notify();
+          }
+        }
+
+        async updateTicket(ticketId, updatedData) {
+          const ticket = this.getTicket(ticketId);
+          if (!ticket) return;
+
+          // Logic for auto-assigning sprint on status change (mirrors original logic)
+          let sprintId = ticket.sprintId;
+          const oldStatus = ticket.status;
+          const newStatus = updatedData.status;
+
+          if (newStatus && oldStatus === "backlog" && newStatus !== "backlog") {
+            const active = this.getActiveSprint();
+            if (active) sprintId = active.id;
+          } else if (newStatus === "backlog") {
+            sprintId = "";
+          }
+
+          // If sprintId is explicitly provided in update, use it
+          if (updatedData.sprintId !== undefined) {
+            sprintId = updatedData.sprintId;
+          }
+
+          const payload = {
+            id: ticketId,
+            ...updatedData,
+            sprintId: sprintId || "",
+          };
+
+          const result = await this._apiCall("updateTicket", payload);
+
+          const index = this.tickets.findIndex((t) => t.id === ticketId);
+          if (index !== -1) {
+            this.tickets[index] = result;
+            this.notify();
+          }
+        }
+
+        async addTicket(ticketData) {
+          // Backend handles ID generation and timestamp
+          const result = await this._apiCall("createTicket", ticketData);
+          this.tickets.push(result);
+          this.notify();
+        }
+
+        async deleteTicket(ticketId) {
+          await this._apiCall("deleteTicket", { id: ticketId });
+          this.tickets = this.tickets.filter((t) => t.id !== ticketId);
+          this.notify();
+        }
+
+        async updateProjectKey(newKey) {
+          if (!newKey || newKey === this.projectKey) return;
+
+          await this._apiCall("updateSettings", { projectKey: newKey });
+
+          // Project Key change affects all Ticket IDs in backend.
+          // Safest approach is to reload all data to ensure synchronization.
+          await this.init();
+        }
+
+        // --- COLUMN MANAGEMENT ---
+
+        async addColumn(title) {
+          const newCol = await this._apiCall("createColumn", { title: title });
+
+          // Backend handles duplicates, check locally before pushing to avoid visual dupes
+          if (!this.columns.find((c) => c.id === newCol.id)) {
+            this.columns.push(newCol);
+            this.notify();
+          }
+        }
+
+        async reorderColumns(newOrderIds) {
+          await this._apiCall("reorderColumns", { newOrderIds: newOrderIds });
+
+          // Reorder local cache
+          const newCols = [];
+          newOrderIds.forEach((id) => {
+            const col = this.columns.find((c) => c.id === id);
+            if (col) newCols.push(col);
+          });
+
+          if (newCols.length === this.columns.length) {
+            this.columns = newCols;
+            this.notify();
+          }
+        }
+
+        async deleteColumn(columnId) {
+          await this._apiCall("deleteColumn", { id: columnId });
+
+          // Backend moves tickets in this column to backlog. Update local state to match.
+          this.tickets.forEach((t) => {
+            if (t.status === columnId) {
+              t.status = "backlog";
+              t.sprintId = "";
+              t.updated = new Date().toISOString();
+            }
+          });
+
+          this.columns = this.columns.filter((c) => c.id !== columnId);
+          this.notify();
+        }
+
+        // --- SPRINT LOGIC ---
+
+        async completeSprint() {
+          const result = await this._apiCall("completeSprint");
+          // Result contains: { completedSprintId, newSprint }
+
+          const completedSprintId = result.completedSprintId;
+          const newSprint = result.newSprint;
+
+          // 1. Mark current sprint as completed
+          const completedSprint = this.sprints.find(
+            (s) => s.id === completedSprintId
+          );
+          if (completedSprint) {
+            completedSprint.status = "completed";
+            completedSprint.completedDate = new Date().toISOString();
+          }
+
+          // 2. Add new sprint
+          this.sprints.push(newSprint);
+
+          // 3. Move incomplete tickets to new sprint (Backend does this, we mirror it locally)
+          this.tickets.forEach((t) => {
+            if (t.sprintId === completedSprintId && t.status !== "done") {
+              t.sprintId = newSprint.id;
+            }
+          });
+
+          this.notify();
+
+          return {
+            completedSprint: completedSprint,
+            nextSprint: newSprint,
+          };
+        }
+      }
+
+      /**
+       * 4. RENDERER (UI COMPONENT LOGIC)
+       */
+      const Renderer = {
+        header(title, currentView, searchQuery) {
+          const showSearch =
+            currentView !== "reports" && currentView !== "archive";
+
+          return `
+                <div class="px-4 h-14 flex items-center justify-between gap-4">
+                    <div class="flex items-center gap-3 shrink-0">
+                        <button onclick="app.toggleSidebar()" class="md:hidden text-gray-600 hover:text-gray-900 p-1 -ml-1">
+                            <i class="ph ph-list text-2xl"></i>
+                        </button>
+                        <h1 class="font-semibold text-lg text-gray-800 truncate" id="page-title">${title}</h1>
+                    </div>
+
+                    <!-- Desktop Search -->
+                    ${
+                      showSearch
+                        ? `
+                    <div class="hidden md:block flex-1 max-w-md">
+                        <div class="relative group">
+                            <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors"></i>
+                            <input type="text" id="search-input-desktop" placeholder="Search issues..." 
+                                   oninput="app.handleSearch(this.value, 'desktop')" 
+                                   value="${searchQuery}"
+                                   class="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 rounded-md bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all">
+                        </div>
+                    </div>
+                    `
+                        : '<div class="hidden md:block flex-1"></div>'
+                    } <!-- Spacer -->
+                    
+                    <div class="flex items-center gap-2 shrink-0" id="header-actions">
+                        <!-- Actions -->
+                    </div>
+                </div>
+                
+                <!-- Mobile Search -->
+                ${
+                  showSearch
+                    ? `
+                <div class="px-4 pb-3 md:hidden border-b border-gray-100">
+                    <div class="relative w-full">
+                        <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+                        <input type="text" id="search-input-mobile" placeholder="Search..." 
+                               oninput="app.handleSearch(this.value, 'mobile')" 
+                               value="${searchQuery}"
+                               class="w-full pl-8 pr-2 py-2 text-sm border border-gray-300 rounded-md bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+                    </div>
+                </div>
+                `
+                    : ""
+                }
+                `;
+        },
+
+        formatDate(date) {
+          if (!date) return "";
+          const d = new Date(date);
+          if (isNaN(d.getTime())) return "";
+          return new Intl.DateTimeFormat("en-US", {
+            month: "short",
+            day: "numeric",
+          }).format(d);
+        },
+
+        getUserAvatar(name) {
+          if (!name || !name.trim()) {
+            return `<div class="w-6 h-6 rounded-full bg-gray-300 text-white flex items-center justify-center text-[10px] font-bold border border-white" title="Unassigned">?</div>`;
+          }
+
+          const parts = name.trim().split(" ");
+          let initials = parts[0][0];
+          if (parts.length > 1) initials += parts[parts.length - 1][0];
+          initials = initials.toUpperCase().substring(0, 2);
+
+          const colors = [
+            "bg-red-500",
+            "bg-blue-500",
+            "bg-green-500",
+            "bg-yellow-500",
+            "bg-purple-500",
+            "bg-pink-500",
+            "bg-indigo-500",
+          ];
+          let hash = 0;
+          for (let i = 0; i < name.length; i++)
+            hash = name.charCodeAt(i) + ((hash << 5) - hash);
+          const color = colors[Math.abs(hash) % colors.length];
+
+          return `<div class="w-6 h-6 rounded-full ${color} text-white flex items-center justify-center text-[10px] font-bold border border-white ring-1 ring-transparent group-hover:ring-gray-100" title="${name}">${initials}</div>`;
+        },
+
+        getPriorityIcon(priority) {
+          const cfg =
+            Config.priorities[priority] || Config.priorities["Medium"];
+          return `<i class="ph-bold ${cfg.icon} ${cfg.color}" title="${priority}"></i>`;
+        },
+
+        card(ticket) {
+          const dateBadge = ticket.due
+            ? `<span class="ml-2 text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium flex items-center gap-1">
+                        <i class="ph ph-clock"></i> ${this.formatDate(
+                          ticket.due
+                        )}
+                     </span>`
+            : "";
+
+          return `
+                <div onclick="app.viewTicket('${
+                  ticket.id
+                }')" class="ticket-card bg-white p-3 rounded-[3px] shadow-sm border border-gray-200 cursor-pointer active:cursor-grabbing mb-2 group relative select-none hover:border-blue-400 transition-colors" data-id="${
+            ticket.id
+          }">
+                    <div class="flex items-start mb-1 gap-2">
+                        <!-- Handle (Left) -->
+                        <div class="text-gray-400 cursor-move handle touch-manipulation p-1 shrink-0 mt-0.5" title="Drag to move"><i class="ph ph-dots-six-vertical"></i></div>
+                        <div class="min-w-0 flex-1">
+                            <span class="text-sm text-gray-800 font-medium leading-tight line-clamp-2">${
+                              ticket.title
+                            }</span>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-center justify-between mt-3 pl-6">
+                        <div class="flex items-center gap-2">
+                            ${this.getPriorityIcon(ticket.priority)}
+                            <span class="text-xs text-gray-500 font-mono">${
+                              ticket.id
+                            }</span>
+                        </div>
+                        <div class="flex items-center">
+                            ${dateBadge}
+                            <div class="ml-2">${this.getUserAvatar(
+                              ticket.assignee
+                            )}</div>
+                        </div>
+                    </div>
+                </div>
+                `;
+        },
+
+        column(col, tickets) {
+          const count = tickets.length;
+          const cardsHtml = tickets.map((t) => this.card(t)).join("");
+
+          const isDefault = Config.defaultColumns.some(
+            (dc) => dc.id === col.id
+          );
+          const deleteBtn = !isDefault
+            ? `<div onclick="app.initDeleteColumn('${col.id}')" class="cursor-pointer text-gray-400 hover:text-red-600 p-1"><i class="ph-bold ph-trash"></i></div>`
+            : "";
+
+          return `
+                <div class="flex flex-col h-full min-w-[280px] max-w-[280px] rounded-lg bg-jira-bg mr-3 board-column" data-col-id="${col.id}">
+                    <div class="p-3 flex justify-between items-center text-xs font-semibold text-gray-500 uppercase tracking-wide sticky top-0 bg-jira-bg z-10 col-handle group cursor-grab active:cursor-grabbing border-b border-transparent hover:border-gray-200 hover:bg-gray-100/50 rounded-t-lg transition-colors">
+                        <div class="flex items-center gap-2 overflow-hidden">
+                            <span class="truncate">${col.title}</span>
+                            <span class="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-[10px] shrink-0">${count}</span>
+                        </div>
+                        <div class="flex items-center">
+                             ${deleteBtn}
+                        </div>
+                    </div>
+                    
+                    <div class="flex-1 px-2 pb-2 overflow-y-auto scrollbar-hide kanban-col min-h-[150px]" id="col-${col.id}" data-status="${col.id}">
+                        ${cardsHtml}
+                    </div>
+                </div>
+                `;
+        },
+
+        board(tickets, columns) {
+          const columnsHtml = columns
+            .map((col) => {
+              const colTickets = tickets.filter((t) => t.status === col.id);
+              return this.column(col, colTickets);
+            })
+            .join("");
+
+          return `
+                <div id="board-scroll-container" class="h-full overflow-x-auto overflow-y-hidden whitespace-nowrap p-4 sm:p-6 flex items-start">
+                    ${columnsHtml}
+                    <div onclick="app.createColumn()" class="min-w-[280px] h-12 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100 cursor-pointer transition-colors shrink-0 group">
+                        <div class="group-hover:scale-110 transition-transform">
+                            <i class="ph ph-plus mr-2"></i> 
+                        </div>
+                        Add Column
+                    </div>
+                </div>
+                `;
+        },
+
+        backlog(allTickets, activeSprintId) {
+          const sorter = (a, b) => {
+            const dateA = a.due ? new Date(a.due).getTime() : Infinity;
+            const dateB = b.due ? new Date(b.due).getTime() : Infinity;
+            return dateA - dateB;
+          };
+
+          let backlogTickets = allTickets.filter((t) => t.status === "backlog");
+          let sprintTickets = allTickets.filter(
+            (t) => t.status !== "backlog" && t.sprintId === activeSprintId
+          );
+
+          backlogTickets.sort(sorter);
+          sprintTickets.sort(sorter);
+
+          const renderRow = (t) => `
+                    <div onclick="app.viewTicket('${
+                      t.id
+                    }')" class="flex flex-col sm:flex-row sm:items-center p-3 bg-white border-b border-gray-100 hover:bg-gray-50 group cursor-pointer ticket-row" data-id="${
+            t.id
+          }">
+                        <div class="flex items-center mb-2 sm:mb-0 w-full sm:w-auto flex-1">
+                             <div class="mr-3 text-gray-400 cursor-move handle touch-manipulation p-1"><i class="ph ph-dots-six-vertical text-lg"></i></div>
+                             <div class="min-w-0 flex-1">
+                                <div class="flex items-center">
+                                     <span class="text-sm text-gray-800 font-medium truncate highlight-text">${
+                                       t.title
+                                     }</span>
+                                     ${
+                                       t.due
+                                         ? `<span class="ml-2 text-[10px] text-red-500 bg-red-50 px-1 rounded whitespace-nowrap">${this.formatDate(
+                                             t.due
+                                           )}</span>`
+                                         : ""
+                                     }
+                                </div>
+                                <span class="text-xs text-gray-400 sm:hidden mt-0.5 block highlight-text">${
+                                  t.id
+                                }</span>
+                             </div>
+                        </div>
+                        <div class="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-4 px-0 sm:px-4 mt-1 sm:mt-0 pl-10 sm:pl-0">
+                            <span class="text-xs text-gray-400 hidden sm:block highlight-text">${
+                              t.id
+                            }</span>
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs bg-gray-100 px-2 py-1 rounded text-gray-600 uppercase">${
+                                  t.status
+                                }</span>
+                                ${this.getPriorityIcon(t.priority)}
+                                ${this.getUserAvatar(t.assignee)}
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+          return `
+                <div class="p-4 sm:p-8 max-w-5xl mx-auto h-full overflow-y-auto">
+                    <div class="mb-8">
+                        <div class="flex justify-between items-center mb-2">
+                            <div>
+                                <h2 class="text-lg font-bold text-gray-800">Active Sprint</h2>
+                                <p class="text-xs text-gray-500">${
+                                  sprintTickets.length
+                                } issues</p>
+                            </div>
+                            <button onclick="app.navigate('board')" class="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded hover:bg-blue-200">Go to Board</button>
+                        </div>
+                        <div id="active-sprint-list" class="bg-white border border-gray-200 rounded shadow-sm min-h-[50px]">
+                             ${
+                               sprintTickets.length
+                                 ? sprintTickets.map(renderRow).join("")
+                                 : '<div class="p-4 text-sm text-gray-500 empty-msg">Drag issues here to plan sprint.</div>'
+                             }
+                        </div>
+                    </div>
+                    <div>
+                        <h2 class="text-lg font-bold text-gray-800 mb-1">Backlog</h2>
+                        <p class="text-sm text-gray-500 mb-4">Issues to be worked on in future sprints. Sorted by Due Date.</p>
+                        <div id="backlog-list" class="bg-white border border-gray-200 rounded shadow-sm min-h-[50px]">
+                            ${
+                              backlogTickets.length
+                                ? backlogTickets.map(renderRow).join("")
+                                : '<div class="p-6 text-center text-gray-500 empty-msg">No issues in backlog.</div>'
+                            }
+                        </div>
+                    </div>
+                </div>
+                `;
+        },
+
+        archive(completedSprints, allTickets) {
+          const renderSprintArchive = (sprint) => {
+            const tickets = allTickets.filter(
+              (t) => t.sprintId === sprint.id && t.status === "done"
+            );
+            return `
+                    <div class="mb-6 bg-white rounded border border-gray-200 overflow-hidden">
+                        <div class="px-4 py-3 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+                            <div>
+                                <span class="font-bold text-gray-700">${
+                                  sprint.name
+                                }</span>
+                                <span class="text-xs text-gray-500 ml-2 hidden sm:inline">Completed ${this.formatDate(
+                                  sprint.completedDate
+                                )}</span>
+                            </div>
+                            <span class="text-xs font-bold bg-green-100 text-green-700 px-2 py-1 rounded">${
+                              tickets.length
+                            } Done</span>
+                        </div>
+                        <div class="p-2">
+                            ${
+                              tickets.length
+                                ? tickets
+                                    .map(
+                                      (t) => `
+                                <div class="flex items-center justify-between p-2 hover:bg-gray-50 text-sm border-b last:border-0 border-gray-100">
+                                    <div class="flex items-center gap-2 overflow-hidden">
+                                        <span class="text-gray-400 text-xs w-16 shrink-0 hidden sm:block">${
+                                          t.id
+                                        }</span>
+                                        <span class="text-gray-700 line-through opacity-60 truncate">${
+                                          t.title
+                                        }</span>
+                                    </div>
+                                    <div class="opacity-50 shrink-0 ml-2">${this.getUserAvatar(
+                                      t.assignee
+                                    )}</div>
+                                </div>
+                            `
+                                    )
+                                    .join("")
+                                : '<div class="p-2 text-sm text-gray-400 italic">No tickets were completed in this sprint.</div>'
+                            }
+                        </div>
+                    </div>
+                    `;
+          };
+
+          return `
+                <div class="p-4 sm:p-8 max-w-4xl mx-auto h-full overflow-y-auto">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-6">Project Archive</h2>
+                    ${
+                      completedSprints.length
+                        ? completedSprints.map(renderSprintArchive).join("")
+                        : `
+                        <div class="text-center py-12">
+                            <div class="inline-flex p-4 rounded-full bg-gray-100 mb-4"><i class="ph ph-archive-box text-2xl text-gray-400"></i></div>
+                            <h3 class="text-lg font-medium text-gray-900">No archived sprints yet</h3>
+                            <p class="text-gray-500">Completed sprints and their tickets will appear here.</p>
+                        </div>
+                    `
+                    }
+                </div>
+                `;
+        },
+
+        reports(tickets, sprints, columns) {
+          const total = tickets.length;
+          const done = tickets.filter((t) => t.status === "done").length;
+          const completionRate = total ? Math.round((done / total) * 100) : 0;
+          const statusCounts = columns.reduce(
+            (acc, col) => {
+              acc[col.title] = tickets.filter(
+                (t) => t.status === col.id
+              ).length;
+              return acc;
+            },
+            { Backlog: tickets.filter((t) => t.status === "backlog").length }
+          );
+          const priorityCounts = tickets.reduce((acc, t) => {
+            acc[t.priority] = (acc[t.priority] || 0) + 1;
+            return acc;
+          }, {});
+          const renderBar = (label, count, total, colorClass) => {
+            const pct = total ? (count / total) * 100 : 0;
+            return `
+                    <div class="mb-3">
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="font-medium text-gray-600">${label}</span>
+                            <span class="text-gray-500">${count}</span>
+                        </div>
+                        <div class="w-full bg-gray-100 rounded-full h-2">
+                            <div class="bar-fill h-2 rounded-full ${colorClass}" style="width: ${pct}%"></div>
+                        </div>
+                    </div>`;
+          };
+          return `
+                <div class="p-4 sm:p-8 max-w-5xl mx-auto h-full overflow-y-auto">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-6">Project Statistics</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 mb-8">
+                        <div class="bg-white p-6 rounded shadow-sm border border-gray-200">
+                            <div class="text-gray-500 text-sm font-medium uppercase mb-1">Total Tickets</div>
+                            <div class="text-3xl font-bold text-gray-800">${total}</div>
+                        </div>
+                        <div class="bg-white p-6 rounded shadow-sm border border-gray-200">
+                            <div class="text-gray-500 text-sm font-medium uppercase mb-1">Completed</div>
+                            <div class="text-3xl font-bold text-green-600">${done}</div>
+                        </div>
+                        <div class="bg-white p-6 rounded shadow-sm border border-gray-200">
+                            <div class="text-gray-500 text-sm font-medium uppercase mb-1">Completion Rate</div>
+                            <div class="text-3xl font-bold text-blue-600">${completionRate}%</div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                        <div class="bg-white p-6 rounded shadow-sm border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Status Breakdown</h3>
+                            ${Object.entries(statusCounts)
+                              .map(([k, v]) =>
+                                renderBar(k, v, total, "bg-blue-500")
+                              )
+                              .join("")}
+                        </div>
+                        <div class="bg-white p-6 rounded shadow-sm border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Priority Breakdown</h3>
+                            ${Object.entries(priorityCounts)
+                              .map(([k, v]) =>
+                                renderBar(
+                                  k,
+                                  v,
+                                  total,
+                                  k === "High"
+                                    ? "bg-red-500"
+                                    : k === "Medium"
+                                    ? "bg-orange-400"
+                                    : "bg-green-500"
+                                )
+                              )
+                              .join("")}
+                        </div>
+                    </div>
+                </div>
+                `;
+        },
+      };
+
+      /**
+       * 5. APP CONTROLLER
+       */
+      class FastKanban {
+        constructor() {
+          this.store = new Store();
+          this.container = document.getElementById("view-container");
+          this.headerContainer = document.getElementById("main-header");
+          this.currentView = "board";
+          this.currentTicketId = null;
+          this.sidebarOpen = false;
+          this.columnToDelete = null;
+          this.searchQuery = "";
+
+          // Setup
+          this.store.subscribe(() => this.render());
+
+          // Global Keyboard Event
+          document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") {
+              const openModals = document.querySelectorAll(
+                '[id$="-modal-overlay"]:not(.hidden)'
+              );
+              openModals.forEach((modal) => modal.classList.add("hidden"));
+              if (this.sidebarOpen) this.toggleSidebar();
+            }
+          });
+
+          this.render();
+          this.populateFormSelects();
+        }
+
+        handleSearch(val, source) {
+          this.searchQuery = val.toLowerCase();
+          this.render(); // Trigger re-render to filter
+
+          // Intelligent focus restoration
+          setTimeout(() => {
+            let inputId =
+              source === "mobile"
+                ? "search-input-mobile"
+                : "search-input-desktop";
+            // Fallback if one isn't visible due to resize
+            let input = document.getElementById(inputId);
+            if (!input && source === "desktop")
+              input = document.getElementById("search-input-mobile");
+            if (!input && source === "mobile")
+              input = document.getElementById("search-input-desktop");
+
+            if (input) {
+              input.focus();
+              // Move cursor to end
+              const v = input.value;
+              input.value = "";
+              input.value = v;
+            }
+          }, 0);
+        }
+
+        filterTickets(tickets) {
+          if (!this.searchQuery) return tickets;
+          return tickets.filter(
+            (t) =>
+              t.title.toLowerCase().includes(this.searchQuery) ||
+              t.id.toLowerCase().includes(this.searchQuery)
+          );
+        }
+
+        toggleSidebar() {
+          this.sidebarOpen = !this.sidebarOpen;
+          const sidebar = document.getElementById("sidebar");
+          const overlay = document.getElementById("sidebar-overlay");
+
+          if (this.sidebarOpen) {
+            sidebar.classList.remove("sidebar-closed");
+            sidebar.classList.add("sidebar-open");
+            overlay.classList.remove("hidden", "opacity-0");
+          } else {
+            sidebar.classList.add("sidebar-closed");
+            sidebar.classList.remove("sidebar-open");
+            overlay.classList.add("opacity-0");
+            setTimeout(() => overlay.classList.add("hidden"), 300);
+          }
+        }
+
+        populateFormSelects() {
+          const select = document.getElementById("edit-status");
+          if (select) {
+            select.innerHTML = "";
+            const backlogOpt = document.createElement("option");
+            backlogOpt.value = "backlog";
+            backlogOpt.text = "Backlog";
+            select.appendChild(backlogOpt);
+
+            this.store.columns.forEach((col) => {
+              const opt = document.createElement("option");
+              opt.value = col.id;
+              opt.text = col.title;
+              select.appendChild(opt);
+            });
+          }
+        }
+
+        updateAvatarPreview(mode, name) {
+          const id =
+            mode === "create" ? "create-avatar-preview" : "edit-avatar-preview";
+          document.getElementById(id).innerHTML = Renderer.getUserAvatar(name);
+        }
+
+        render() {
+          this.populateFormSelects();
+          // Capture Scroll
+          const scrollMap = new Map();
+          const boardScroll = document.getElementById("board-scroll-container");
+          if (boardScroll)
+            scrollMap.set("board-scroll-container", {
+              left: boardScroll.scrollLeft,
+              top: boardScroll.scrollTop,
+            });
+          const scrollableElements =
+            this.container.querySelectorAll('[id*="col-"]');
+          scrollableElements.forEach((el) => {
+            if (el.id)
+              scrollMap.set(el.id, { left: el.scrollLeft, top: el.scrollTop });
+          });
+
+          // Sidebar
+          document
+            .querySelectorAll(".nav-item")
+            .forEach((el) => el.classList.remove("bg-blue-800", "text-white"));
+          const activeNav = document.getElementById(`nav-${this.currentView}`);
+          if (activeNav) activeNav.classList.add("bg-blue-800", "text-white");
+
+          // Header
+          const headerActions = document.getElementById("header-actions");
+          const pageTitle = document.getElementById("page-title");
+
+          // Filter tickets based on search
+          const filteredTickets = this.filterTickets(this.store.tickets);
+          let pageTitleText = "";
+
+          if (this.currentView === "board") {
+            const activeSprint = this.store.getActiveSprint();
+            pageTitleText = activeSprint ? activeSprint.name : "Active Sprint";
+            this.headerContainer.innerHTML = Renderer.header(
+              pageTitleText,
+              this.currentView,
+              this.searchQuery
+            );
+
+            let actionsHtml = "";
+            if (activeSprint) {
+              actionsHtml += `<button onclick="app.openCompleteSprintModal()" class="text-gray-600 hover:bg-gray-100 px-3 py-1.5 rounded font-medium text-xs sm:text-sm transition-colors mr-2 border border-gray-300 whitespace-nowrap">Complete Sprint</button>`;
+            }
+            actionsHtml += `<button onclick="app.toggleModal('create')" class="bg-jira-primary hover:bg-blue-700 text-white px-3 py-1.5 rounded-[3px] text-xs sm:text-sm font-medium transition-colors whitespace-nowrap">Create Ticket</button>`;
+            document.getElementById("header-actions").innerHTML = actionsHtml;
+
+            const sprintTickets = activeSprint
+              ? filteredTickets.filter((t) => t.sprintId === activeSprint.id)
+              : [];
+            this.container.innerHTML = Renderer.board(
+              sprintTickets,
+              this.store.columns
+            );
+
+            if (sprintTickets.length || this.store.columns.length) {
+              this.initDragAndDrop();
+              this.initColumnDragAndDrop();
+            }
+          } else if (this.currentView === "backlog") {
+            pageTitleText = "Backlog";
+            this.headerContainer.innerHTML = Renderer.header(
+              pageTitleText,
+              this.currentView,
+              this.searchQuery
+            );
+            document.getElementById(
+              "header-actions"
+            ).innerHTML = `<button onclick="app.toggleModal('create')" class="bg-jira-primary hover:bg-blue-700 text-white px-3 py-1.5 rounded-[3px] text-xs sm:text-sm font-medium transition-colors">Create Ticket</button>`;
+
+            const activeSprint = this.store.getActiveSprint();
+            this.container.innerHTML = Renderer.backlog(
+              filteredTickets,
+              activeSprint ? activeSprint.id : null
+            );
+            this.initBacklogDragAndDrop();
+          } else if (this.currentView === "archive") {
+            pageTitleText = "Archive";
+            this.headerContainer.innerHTML = Renderer.header(
+              pageTitleText,
+              this.currentView,
+              this.searchQuery
+            );
+            document.getElementById("header-actions").innerHTML = "";
+            this.container.innerHTML = Renderer.archive(
+              this.store.getCompletedSprints(),
+              this.store.tickets
+            );
+          } else if (this.currentView === "reports") {
+            pageTitleText = "Reports";
+            this.headerContainer.innerHTML = Renderer.header(
+              pageTitleText,
+              this.currentView,
+              this.searchQuery
+            );
+            document.getElementById("header-actions").innerHTML = "";
+            this.container.innerHTML = Renderer.reports(
+              this.store.tickets,
+              this.store.sprints,
+              this.store.columns
+            );
+          }
+
+          // Restore Scroll
+          scrollMap.forEach((pos, id) => {
+            const el = document.getElementById(id);
+            if (el) {
+              el.scrollLeft = pos.left;
+              el.scrollTop = pos.top;
+            }
+          });
+        }
+
+        navigate(view) {
+          this.currentView = view;
+          if (this.sidebarOpen) this.toggleSidebar();
+          this.render();
+        }
+
+        // --- MODALS & ACTIONS ---
+
+        toggleModal(type) {
+          let id;
+          switch (type) {
+            case "create":
+              id = "create-modal-overlay";
+              break;
+            case "edit":
+              id = "edit-modal-overlay";
+              break;
+            case "complete-sprint":
+              id = "complete-sprint-modal-overlay";
+              break;
+            case "create-column":
+              id = "create-column-modal-overlay";
+              break;
+            case "delete-column":
+              id = "delete-column-modal-overlay";
+              break;
+            case "settings":
+              id = "settings-modal-overlay";
+              break;
+            case "confirmation":
+              id = "confirmation-modal-overlay";
+              break;
+          }
+
+          const modal = document.getElementById(id);
+          if (modal) {
+            modal.classList.toggle("hidden");
+            if (!modal.classList.contains("hidden")) {
+              if (type === "create") {
+                document.getElementById("input-title").focus();
+                this.updateAvatarPreview("create", "");
+              }
+              if (type === "create-column")
+                document.getElementById("input-column-name").focus();
+              if (type === "settings")
+                document.getElementById("input-project-key").value =
+                  this.store.projectKey;
+            }
+          }
+        }
+
+        // ... Existing Ticket Actions ...
+        openCompleteSprintModal() {
+          const active = this.store.getActiveSprint();
+          if (!active) return;
+          const sprintTickets = this.store.tickets.filter(
+            (t) => t.sprintId === active.id
+          );
+          const doneCount = sprintTickets.filter(
+            (t) => t.status === "done"
+          ).length;
+          const openCount = sprintTickets.length - doneCount;
+          document.getElementById("complete-sprint-name").innerText =
+            active.name;
+          document.getElementById("complete-sprint-done-count").innerText =
+            doneCount;
+          document.getElementById("complete-sprint-open-count").innerText =
+            openCount;
+          document.getElementById(
+            "complete-sprint-next-name"
+          ).innerText = `Sprint ${this.store.sprints.length + 1}`;
+          this.toggleModal("complete-sprint");
+        }
+
+        showConfirmation(
+          title,
+          message,
+          onConfirmCallback,
+          actionText = "Delete",
+          isDanger = true
+        ) {
+          // Update Text
+          document.getElementById("confirm-modal-title").innerText = title;
+          document.getElementById("confirm-modal-msg").innerText = message;
+
+          // Update Action Button Style & Text
+          const btn = document.getElementById("confirm-btn-action");
+          btn.innerText = actionText;
+
+          if (isDanger) {
+            btn.className =
+              "w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none sm:w-auto sm:text-sm";
+            document
+              .getElementById("confirm-icon-bg")
+              .classList.replace("bg-blue-100", "bg-red-100");
+            document
+              .getElementById("confirm-icon")
+              .classList.replace("text-blue-600", "text-red-600");
+            document
+              .getElementById("confirm-icon")
+              .classList.replace("ph-info", "ph-warning");
+          } else {
+            // Optional styling for non-destructive actions
+            btn.className =
+              "w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none sm:w-auto sm:text-sm";
+            document
+              .getElementById("confirm-icon-bg")
+              .classList.replace("bg-red-100", "bg-blue-100");
+            document
+              .getElementById("confirm-icon")
+              .classList.replace("text-red-600", "text-blue-600");
+            document
+              .getElementById("confirm-icon")
+              .classList.replace("ph-warning", "ph-info");
+          }
+
+          // Assign Callback
+          btn.onclick = () => {
+            onConfirmCallback();
+            this.toggleModal("confirmation");
+          };
+
+          this.toggleModal("confirmation");
+        }
+
+        confirmCompleteSprint() {
+          this.store.completeSprint();
+          this.toggleModal("complete-sprint");
+        }
+
+        // ... Ticket CRUD ...
+        createTicket() {
+          const titleInput = document.getElementById("input-title");
+          const titleError = document.getElementById("input-title-error");
+          const title = titleInput.value;
+
+          if (!title.trim()) {
+            titleInput.classList.add("input-error");
+            titleError.classList.remove("hidden");
+            return;
+          } else {
+            titleInput.classList.remove("input-error");
+            titleError.classList.add("hidden");
+          }
+
+          const dueVal = document.getElementById("input-due").value;
+          const assigneeVal = document.getElementById("input-assignee").value;
+
+          const ticketData = {
+            title,
+            priority: document.getElementById("input-priority").value,
+            description: document.getElementById("input-desc").value,
+            assignee: assigneeVal,
+            status: this.currentView === "board" ? "todo" : "backlog",
+            sprintId:
+              this.currentView === "board"
+                ? this.store.getActiveSprint()?.id
+                : null,
+            due: dueVal ? new Date(dueVal) : null,
+          };
+
+          this.store.addTicket(ticketData);
+          titleInput.value = "";
+          document.getElementById("input-desc").value = "";
+          document.getElementById("input-due").value = "";
+          document.getElementById("input-assignee").value = "";
+          this.toggleModal("create");
+        }
+
+        viewTicket(id) {
+          const ticket = this.store.getTicket(id);
+          if (!ticket) return;
+          this.currentTicketId = id;
+          document.getElementById("edit-ticket-id").innerText = ticket.id;
+          document.getElementById("edit-title").value = ticket.title;
+          document.getElementById("edit-desc").value = ticket.description || "";
+          document.getElementById("edit-status").value = ticket.status;
+          document.getElementById("edit-priority").value = ticket.priority;
+          document.getElementById("edit-assignee").value =
+            ticket.assignee || "";
+
+          this.updateAvatarPreview("edit", ticket.assignee || "");
+
+          const dueInput = document.getElementById("edit-due");
+          if (ticket.due) {
+            const d = new Date(ticket.due);
+            dueInput.value = d.toISOString().split("T")[0];
+          } else {
+            dueInput.value = "";
+          }
+          document.getElementById("edit-created").innerText = new Date(
+            ticket.created
+          ).toLocaleDateString();
+          document.getElementById("edit-updated").innerText = new Date(
+            ticket.updated
+          ).toLocaleString();
+          this.toggleModal("edit");
+        }
+
+        saveTicketChanges() {
+          if (!this.currentTicketId) return;
+          const dueVal = document.getElementById("edit-due").value;
+          const updates = {
+            title: document.getElementById("edit-title").value,
+            description: document.getElementById("edit-desc").value,
+            status: document.getElementById("edit-status").value,
+            priority: document.getElementById("edit-priority").value,
+            assignee: document.getElementById("edit-assignee").value,
+            due: dueVal ? new Date(dueVal) : null,
+          };
+          this.store.updateTicket(this.currentTicketId, updates);
+          this.toggleModal("edit");
+        }
+
+        deleteCurrentTicket() {
+          if (!this.currentTicketId) return;
+
+          // Define the action to run if user clicks Confirm
+          const performDelete = () => {
+            const id = this.currentTicketId;
+            this.toggleModal("edit"); // Close the Edit Ticket Modal
+            this.currentTicketId = null;
+            this.store.deleteTicket(id);
+          };
+
+          // Trigger the UI Modal
+          this.showConfirmation(
+            "Delete Issue",
+            "Are you sure you want to delete this issue? This action cannot be undone.",
+            performDelete,
+            "Delete Issue",
+            true
+          );
+        }
+
+        // --- COLUMN ACTIONS ---
+        createColumn() {
+          this.toggleModal("create-column");
+        }
+        confirmCreateColumn() {
+          const title = document.getElementById("input-column-name").value;
+          if (title && title.trim()) {
+            this.store.addColumn(title.trim());
+            document.getElementById("input-column-name").value = "";
+            this.toggleModal("create-column");
+            this.populateFormSelects();
+          }
+        }
+
+        initDeleteColumn(columnId) {
+          const col = this.store.getColumn(columnId);
+          if (!col) return;
+          this.columnToDelete = columnId;
+          // Calculate impact
+          const count = this.store.tickets.filter(
+            (t) => t.status === columnId
+          ).length;
+          document.getElementById("delete-column-name").innerText = col.title;
+          document.getElementById("delete-column-count").innerText = count;
+          this.toggleModal("delete-column");
+        }
+
+        confirmDeleteColumn() {
+          if (this.columnToDelete) {
+            this.store.deleteColumn(this.columnToDelete);
+            this.toggleModal("delete-column");
+            this.columnToDelete = null;
+            this.populateFormSelects();
+          }
+        }
+
+        // --- SETTINGS ---
+        saveSettings() {
+          const newKey = document
+            .getElementById("input-project-key")
+            .value.toUpperCase()
+            .trim();
+          if (newKey && newKey.length > 0) {
+            this.store.updateProjectKey(newKey);
+            this.toggleModal("settings");
+          }
+        }
+
+        // --- DND INIT ---
+        initDragAndDrop() {
+          const columns = document.querySelectorAll(".kanban-col");
+          columns.forEach((col) => {
+            new Sortable(col, {
+              group: "shared",
+              handle: ".handle", // New: Drag by handle only on board
+              animation: 150,
+              ghostClass: "ghost-card",
+              delay: 0, // Handle removes need for delay
+              forceFallback: true,
+              fallbackClass: "sortable-fallback",
+              scroll: true,
+              scrollSensitivity: 100,
+              scrollSpeed: 20,
+              onEnd: (evt) => {
+                const itemEl = evt.item;
+                const newStatus = evt.to.getAttribute("data-status");
+                const ticketId = itemEl.getAttribute("data-id");
+                this.store.updateTicketStatus(ticketId, newStatus);
+              },
+            });
+          });
+        }
+
+        initColumnDragAndDrop() {
+          const boardContainer = document.getElementById(
+            "board-scroll-container"
+          );
+          if (boardContainer) {
+            new Sortable(boardContainer, {
+              animation: 150,
+              handle: ".col-handle", // Drag by header only
+              draggable: ".board-column", // Draggable items
+              ghostClass: "opacity-50",
+              onEnd: (evt) => {
+                // Get new order of IDs
+                const cols = Array.from(
+                  boardContainer.querySelectorAll(".board-column")
+                );
+                const newOrderIds = cols.map((c) =>
+                  c.getAttribute("data-col-id")
+                );
+                this.store.reorderColumns(newOrderIds);
+              },
+            });
+          }
+        }
+
+        initBacklogDragAndDrop() {
+          const activeList = document.getElementById("active-sprint-list");
+          const backlogList = document.getElementById("backlog-list");
+
+          if (activeList && backlogList) {
+            const ops = {
+              group: "backlog-planning",
+              handle: ".handle",
+              animation: 150,
+              ghostClass: "ghost-card",
+            };
+
+            new Sortable(activeList, {
+              ...ops,
+              onAdd: (evt) => {
+                const ticketId = evt.item.getAttribute("data-id");
+                if (ticketId) {
+                  const activeSprint = this.store.getActiveSprint();
+
+                  // FIX: Dynamic Column Mapping
+                  // Ensure we map to the first available column ID instead of hardcoded "todo"
+                  const firstColId =
+                    this.store.columns.length > 0
+                      ? this.store.columns[0].id
+                      : "todo";
+
+                  if (activeSprint)
+                    this.store.updateTicketStatus(
+                      ticketId,
+                      firstColId, // changed from "todo"
+                      activeSprint.id
+                    );
+                }
+              },
+            });
+
+            new Sortable(backlogList, {
+              ...ops,
+              onAdd: (evt) => {
+                const ticketId = evt.item.getAttribute("data-id");
+                if (ticketId) {
+                  this.store.updateTicketStatus(ticketId, "backlog", null);
+                }
+              },
+            });
+          }
+        }
+      }
+
+      // START APP
+      const app = new FastKanban();
+    </script>
+  </body>
+</html>
